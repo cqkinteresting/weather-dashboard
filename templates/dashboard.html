@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>河南18地市气象数据</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--primary:#2c3e50;--accent:#3498db;--hot:#e74c3c;--warm:#f39c12;--cool:#3498db;--cold:#7f8c8d}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;background:var(--bg);color:#333;line-height:1.5}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);color:#fff;padding:16px 32px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+.header h1{font-size:20px;font-weight:600}
+.header .sub{font-size:12px;opacity:.7}
+.btn{padding:8px 20px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:.2s}
+.btn-refresh{background:var(--accent);color:#fff}.btn-refresh:hover{background:#2980b9}
+.btn-date{background:#fff2;color:#fff;margin:0 4px}.btn-date.active{background:#fff4;border:1px solid #fff8}
+.container{max-width:1500px;margin:0 auto;padding:20px}
+.section{margin-bottom:28px}
+.section h2{font-size:17px;color:var(--primary);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.section h2::before{content:'';width:4px;height:20px;background:var(--accent);border-radius:2px;display:inline-block}
+.table-wrap{background:var(--card);border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--primary);color:#fff;padding:10px 6px;font-weight:500;white-space:nowrap;font-size:12px}
+td{padding:8px 6px;text-align:center;border-bottom:1px solid #f0f0f0;font-variant-numeric:tabular-nums}
+tr:hover{background:#f0f5ff}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;min-width:30px}
+.tag-hot{background:#ffe0e0;color:var(--hot)}.tag-warm{background:#fff3e0;color:var(--warm)}
+.tag-cool{background:#e3f2fd;color:var(--cool)}.tag-cold{background:#eceff1;color:var(--cold)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+.card{background:var(--card);border-radius:10px;padding:18px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.card h3{font-size:15px;color:var(--primary);margin-bottom:12px}
+.card .temps{display:flex;justify-content:center;gap:32px;margin:12px 0}
+.card .temps .val{font-size:36px;font-weight:700;line-height:1.2}
+.card .hi{color:var(--hot)}.card .lo{color:var(--cool)}
+.card .label{font-size:11px;color:#999;margin-top:2px}
+.card .meta{font-size:12px;color:#666;text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0}
+.delta{font-size:11px;margin-left:4px}
+.delta-up{color:var(--hot)}.delta-down{color:var(--cool)}
+.chart-wrap{background:var(--card);border-radius:10px;padding:16px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.date-bar{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0 16px}
+.loading{text-align:center;padding:60px;color:#999}.footer{text-align:center;padding:24px;color:#999;font-size:11px}
+.na{color:#ccc}
+</style>
+</head>
+<body>
+<div class="header">
+    <div>
+        <h1>河南18地市气象看板</h1>
+        <div class="sub" id="updateTime">加载中...</div>
+    </div>
+    <div style="display:flex;gap:8px">
+        <button class="btn btn-refresh" onclick="refresh()">刷新数据</button>
+    </div>
+</div>
+<div class="container">
+
+<div class="section">
+    <h2>18地市 今日+明日 7时刻气温 (°C)</h2>
+    <div class="date-bar" id="dateBar"></div>
+    <div class="table-wrap"><table id="table18"></table></div>
+</div>
+
+<div class="section">
+    <h2>3地市气温趋势 (30天)</h2>
+    <div class="chart-wrap"><canvas id="trendChart" height="300"></canvas></div>
+</div>
+
+<div class="section">
+    <h2>3地市今日/明日天气对比</h2>
+    <div class="grid" id="cityCards"></div>
+</div>
+
+</div>
+<div class="footer">每天刷新存一条历史 | Flask + SQLite + Chart.js</div>
+
+<script>
+const TIME_ORDER = ["今日11:00","今日16:00","今日19:00","明日04:00","明日11:00","明日16:00","明日19:00"];
+const TIME_SHORT = ["今11:00","今16:00","今19:00","明04:00","明11:00","明16:00","明19:00"];
+
+function colorTag(v){
+    let c='cool',l='tag-cool';
+    if(v>=30){c='hot';l='tag-hot'}else if(v>=25){c='warm';l='tag-warm'}else if(v<15){c='cold';l='tag-cold'}
+    return `<span class="tag ${l}">${v}°</span>`;
+}
+
+let currentDate = null;
+
+function loadDay(date){
+    currentDate = date;
+    fetch('/api/history?date='+date).then(r=>r.json()).then(d=>{
+        render18(d.cities_18);
+        render3(d.cities_3, date);
+        document.getElementById('updateTime').textContent = '数据日期: '+date;
+    });
+}
+
+function render18(data){
+    let cities = Object.keys(data).sort();
+    let h='<thead><tr><th>地市</th>'+TIME_SHORT.map(t=>`<th>${t}</th>`).join('')+'</tr></thead><tbody>';
+    cities.forEach(c=>{
+        h+='<tr><td><b>'+c+'</b></td>';
+        TIME_ORDER.forEach(tp=>{
+            let v=data[c]&&data[c][tp]!=null?data[c][tp]:null;
+            h+=`<td>${v!==null?colorTag(v):'<span class="na">-</span>'}</td>`;
+        });
+        h+='</tr>';
+    });
+    h+='</tbody>';
+    document.getElementById('table18').innerHTML=h;
+}
+
+function render3(data, date){
+    let cards='';
+    data.forEach(d=>{
+        cards+=`<div class="card"><h3>${d.city}</h3>
+        <div class="temps"><div><div class="val hi">${d.high}°</div><div class="label">高温</div></div>
+        <div><div class="val lo">${d.low}°</div><div class="label">低温</div></div></div>
+        <div class="meta">${d.weather} | 风力${d.wind}级</div></div>`;
+    });
+    document.getElementById('cityCards').innerHTML=cards;
+}
+
+function loadDates(){
+    fetch('/api/history').then(r=>r.json()).then(d=>{
+        let date=d.date;
+        currentDate=date;
+        // Generate last 7 days
+        let bar='';
+        for(let i=6;i>=0;i--){
+            let dt=new Date();
+            dt.setDate(dt.getDate()-i);
+            let ds=dt.toISOString().slice(0,10);
+            bar+=`<button class="btn btn-date ${ds==date?'active':''}" onclick="loadDay('${ds}')">${ds.slice(5)}</button>`;
+        }
+        document.getElementById('dateBar').innerHTML=bar;
+        loadDay(date);
+    });
+}
+
+// Trend chart
+function loadTrend(){
+    fetch('/api/trend').then(r=>r.json()).then(d=>{
+        let colors={郑州:'#e74c3c',洛阳:'#3498db',南阳:'#27ae60'};
+        let datasets=[];
+        Object.entries(d).forEach(([city,data])=>{
+            datasets.push({
+                label:city,data:data.map(x=>x.high),
+                borderColor:colors[city],backgroundColor:'transparent',
+                tension:.3,pointRadius:2,borderWidth:2
+            });
+            datasets.push({
+                label:city+'低温',data:data.map(x=>x.low),
+                borderColor:colors[city],backgroundColor:'transparent',
+                tension:.3,pointRadius:1,borderWidth:1,borderDash:[4,4]
+            });
+        });
+        new Chart(document.getElementById('trendChart'),{
+            type:'line',
+            data:{labels:d['郑州']?d['郑州'].map(x=>x.date.slice(5)):[],datasets},
+            options:{responsive:true,maintainAspectRatio:false,
+                plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}},
+                scales:{y:{title:{display:true,text:'°C'}}}}
+        });
+    });
+}
+
+function refresh(){
+    fetch('/api/refresh').then(r=>r.json()).then(()=>{
+        loadDates();loadTrend();
+    });
+}
+
+loadDates();loadTrend();
+</script>
+</body>
+</html>
