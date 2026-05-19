@@ -154,6 +154,11 @@ def hourly():
         except: pass
     return jsonify({"labels": [f"{h}:00" for h in HOURS[:-1]]+["24:00"], "data": result})
 
+@app.route("/debug")
+def debug_fetch():
+    data = fetch_all()
+    return jsonify({"c18": len(data.get("cities_18",[])), "c3": len(data.get("cities_3",[]))})
+
 @app.route("/health")
 def health():
     return "OK"
