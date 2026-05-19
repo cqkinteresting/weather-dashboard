@@ -2,8 +2,13 @@
 import sys, os, json, sqlite3
 sys.path.insert(0, os.path.dirname(__file__))
 from flask import Flask, render_template, jsonify, request
-from fetcher import fetch_all
 from datetime import datetime, timedelta
+SECRET = "henan2026"
+
+try:
+    from fetcher import fetch_all
+except:
+    fetch_all = None
 
 app = Flask(__name__)
 DB = os.path.join(os.path.dirname(__file__), "data", "weather.db")
@@ -21,39 +26,28 @@ def init_db():
         weather TEXT, wind TEXT, fetched_at TEXT)""")
     conn.commit(); conn.close()
 
-def do_fetch():
-    print(f"[{datetime.now()}] Fetching...")
-    data = fetch_all()
+def save_weather_data(data):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     today = datetime.now().strftime("%Y-%m-%d")
-
     conn = sqlite3.connect(DB)
-    # 删今日旧数据再插入
     conn.execute("DELETE FROM daily_18 WHERE date=?", (today,))
     conn.execute("DELETE FROM daily_3 WHERE date=?", (today,))
-
     for c in data.get("cities_18", []):
         for tp in ["今日11:00","今日16:00","今日19:00","明日04:00","明日11:00","明日16:00","明日晚峰19:00"]:
             v = c.get(tp)
             if v is not None:
                 conn.execute("INSERT INTO daily_18 VALUES (NULL,?,?,?,?,?,?,?)",
                     (today, c["地市"], tp.replace("明日晚峰19:00","明日19:00"), int(v), "", "", now))
-
     for c in data.get("cities_3", []):
         conn.execute("INSERT INTO daily_3 VALUES (NULL,?,?,?,?,?,?,?)",
             (today, c["地市"], c.get("今日高温"), c.get("今日低温"), c.get("今日天气"), c.get("今日风力"), now))
         conn.execute("INSERT INTO daily_3 VALUES (NULL,?,?,?,?,?,?,?)",
             (today+"_明日", c["地市"], c.get("明日高温"), c.get("明日低温"), c.get("明日天气"), c.get("明日风力"), now))
     conn.commit(); conn.close()
-
-    # Also save JSON for quick loading
     with open(os.path.join(os.path.dirname(__file__), "data", "latest.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    return data
 
 init_db()
-if not os.path.exists(os.path.join(os.path.dirname(__file__), "data", "latest.json")):
-    do_fetch()
 
 @app.route("/")
 def dashboard():
@@ -85,8 +79,19 @@ def dashboard():
 
 @app.route("/api/refresh")
 def refresh():
-    data = do_fetch()
-    return jsonify({"status": "ok", "time": data["time"]})
+    if fetch_all:
+        data = fetch_all()
+        save_weather_data(data)
+        return jsonify({"status": "ok", "time": data["time"]})
+    return jsonify({"status": "error", "msg": "not supported on this server"})
+
+@app.route("/api/push", methods=["POST"])
+def push():
+    data = request.get_json(force=True)
+    if data.get("secret") != SECRET:
+        return jsonify({"status": "error", "msg": "unauthorized"}), 403
+    save_weather_data(data)
+    return jsonify({"status": "ok", "c18": len(data.get("cities_18",[])), "c3": len(data.get("cities_3",[]))})
 
 @app.route("/api/history")
 def history():
