@@ -66,6 +66,11 @@ tr:hover{background:#f0f5ff}
 </div>
 
 <div class="section">
+    <h2>3地市今明两日逐小时温度对比 (郑州/信阳/安阳)</h2>
+    <div class="chart-wrap"><canvas id="hourlyChart" height="300"></canvas></div>
+</div>
+
+<div class="section">
     <h2>3地市今日/明日天气对比</h2>
     <div class="grid" id="cityCards"></div>
 </div>
@@ -164,13 +169,25 @@ function loadTrend(){
     });
 }
 
-function refresh(){
-    fetch('/api/refresh').then(r=>r.json()).then(()=>{
-        loadDates();loadTrend();
+function loadHourly(){
+    fetch('/api/hourly').then(r=>r.json()).then(d=>{
+        let colors={'郑州':'#e74c3c','信阳':'#27ae60','安阳':'#3498db'};
+        let datasets=[];
+        Object.entries(d.data||{}).forEach(([city,cdata])=>{
+            datasets.push({label:city+'今日',data:cdata.today,borderColor:colors[city],backgroundColor:'transparent',tension:.3,pointRadius:3,borderWidth:2});
+            datasets.push({label:city+'明日',data:cdata.tomorrow,borderColor:colors[city],backgroundColor:'transparent',tension:.3,pointRadius:2,borderWidth:1.5,borderDash:[5,3]});
+        });
+        new Chart(document.getElementById('hourlyChart'),{type:'line',data:{labels:d.labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}},scales:{y:{title:{display:true,text:'°C'},suggestedMin:0}}}});
     });
 }
 
-loadDates();loadTrend();
+function refresh(){
+    fetch('/api/refresh').then(r=>r.json()).then(()=>{
+        loadDates();loadTrend();loadHourly();
+    });
+}
+
+loadDates();loadTrend();loadHourly();
 </script>
 </body>
 </html>

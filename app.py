@@ -117,6 +117,43 @@ def trend():
     conn.close()
     return jsonify(result)
 
+@app.route("/api/hourly")
+def hourly():
+    """3地市(郑州/信阳/安阳)今明两日9-24时逐小时温度"""
+    import requests as req, time
+    from datetime import timezone, timedelta
+    API_KEY = "f838a587c0a64bb8b7ed7d314a1ab3ed"
+    API_BASE = "https://nh4y3m9wcv.re.qweatherapi.com/v7/weather/72h"
+    CITIES = [("郑州","101180101"),("信阳","101180601"),("安阳","101180201")]
+    CST = timezone(timedelta(hours=8))
+    HOURS = list(range(9, 25))
+    result = {}
+
+    for name, code in CITIES:
+        try:
+            r = req.get(f"{API_BASE}?location={code}&key={API_KEY}", timeout=10)
+            if r.status_code != 200: continue
+            d = r.json()
+            hour_data = d.get("hourly", [])
+            time_map = {}
+            for h in hour_data:
+                try: time_map[h.get("fxTime","")] = int(h.get("temp", 0))
+                except: pass
+            today = datetime.now(CST)
+            city_data = {"today": [], "tomorrow": []}
+            for offset, key in [(0,"today"),(1,"tomorrow")]:
+                for hr in HOURS:
+                    if hr == 24:
+                        t = today + timedelta(days=offset+1, hours=0)
+                    else:
+                        t = today + timedelta(days=offset, hours=hr)
+                    k = t.strftime("%Y-%m-%dT%H:00+08:00")
+                    city_data[key].append(time_map.get(k))
+            result[name] = city_data
+            time.sleep(0.1)
+        except: pass
+    return jsonify({"labels": [f"{h}:00" for h in HOURS[:-1]]+["24:00"], "data": result})
+
 @app.route("/health")
 def health():
     return "OK"
